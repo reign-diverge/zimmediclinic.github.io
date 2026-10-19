@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zim MediCare | Digital Hospital & Live Telehealth Platform</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+              800: '#166534',
+              900: '#14532d',
+            },
+            accent: {
+              500: '#0284c7',
+              600: '#0369a1',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    .glass-card {
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(229, 231, 235, 0.8);
+    }
+    .pulse-ring {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+      animation: pulse-red 2s infinite;
+    }
+    @keyframes pulse-red {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    /* Custom Scrollbars for Chat */
+    .chat-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .chat-scroll::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .chat-scroll::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+  </style>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // Initialize Firebase Configuration safely using provided fallback objects
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'zim-medicare-app';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' 
+      ? JSON.parse(__firebase_config) 
+      : {
+          apiKey: "demo-api-key",
+          authDomain: "demo-app.firebaseapp.com",
+          projectId: "demo-app",
+          storageBucket: "demo-app.appspot.com",
+          messagingSenderId: "123456789",
+          appId: "1:123456789:web:abcdef"
+        };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Attach to window object for global app controller access
+    window.firebaseApp = { 
+      app, auth, db, appId, serverTimestamp, doc, collection, addDoc, onSnapshot, setDoc, getDoc,
+      createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile
+    };
+
+    async function initAuth() {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          // Default anonymous session if no user signed in
+          if (!auth.currentUser) {
+            await signInAnonymously(auth);
+          }
+        }
+      } catch (err) {
+        console.warn("Firebase Auth fallback to anonymous mode:", err.message);
+        try {
+          if (!auth.currentUser) await signInAnonymously(auth);
+        } catch(e) {
+          console.error("Auth failed:", e);
+        }
+      }
+    }
+
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        window.currentUser = user;
+        console.log("Authenticated User ID:", user.uid, "Is Anonymous:", user.isAnonymous);
+        
+        // Fetch patient profile if available
+        if (!user.isAnonymous) {
+          try {
+            const userDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
+            const snap = await getDoc(userDocRef);
+            if (snap.exists()) {
+              window.userProfileData = snap.data();
+            } else if (user.displayName) {
+              window.userProfileData = { fullName: user.displayName, email: user.email };
+            }
+          } catch(e) {
+            console.error("Error fetching user profile doc:", e);
+          }
+        } else {
+          window.userProfileData = null;
+        }
+
+        if (window.updateAuthUI) {
+          window.updateAuthUI();
+        }
+        if (window.onAuthReady) {
+          window.onAuthReady(user);
+        }
+      } else {
+        window.currentUser = null;
+        window.userProfileData = null;
+        if (window.updateAuthUI) window.updateAuthUI();
+      }
+    });
+
+    initAuth();
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased flex flex-col min-h-screen">
+
+  <!-- TOP HEADER & NAV -->
+  <header class="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        
+        <!-- Logo -->
+        <div class="flex items-center gap-3 cursor-pointer" onclick="navigateTo('home')">
+          <div class="bg-brand-600 text-white p-2 rounded-xl flex items-center justify-center shadow-md">
+            <i data-lucide="cross" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <span class="text-xl font-bold tracking-tight text-slate-900 block leading-tight">Zim MediCare</span>
+            <span class="text-xs text-brand-700 font-medium tracking-wide">Online Hospital Platform</span>
+          </div>
+        </div>
+
+        <!-- Navigation Links -->
+        <nav class="hidden md:flex items-center gap-1">
+          <button onclick="navigateTo('home')" id="nav-home" class="px-3 py-2 rounded-lg text-sm font-medium transition text-brand-700 bg-brand-50">Home</button>
+          <button onclick="navigateTo('doctors')" id="nav-doctors" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-brand-600 hover:bg-slate-100 transition">Find Doctors</button>
+          <button onclick="navigateTo('messages')" id="nav-messages" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-brand-600 hover:bg-slate-100 transition flex items-center gap-1.5">
+            <i data-lucide="message-square" class="w-4 h-4"></i>
+            Live Chat
+            <span id="unread-badge" class="hidden bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">●</span>
+          </button>
+          <button onclick="navigateTo('pharmacy')" id="nav-pharmacy" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-brand-600 hover:bg-slate-100 transition flex items-center gap-1.5">
+            Pharmacy
+            <span id="cart-badge" class="bg-brand-600 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">0</span>
+          </button>
+          <button onclick="navigateTo('records')" id="nav-records" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-brand-600 hover:bg-slate-100 transition">Medical Records</button>
+          <button onclick="navigateTo('portals')" id="nav-portals" class="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-brand-600 hover:bg-slate-100 transition">Portals & Views</button>
+        </nav>
+
+        <!-- Action CTAs & Auth Controls -->
+        <div class="flex items-center gap-2">
+          <!-- Auth Status Widget -->
+          <div id="auth-header-widget" class="flex items-center gap-2">
+            <!-- Injected by JavaScript -->
+          </div>
+
+          <button onclick="triggerEmergency()" class="bg-red-600 hover:bg-red-700 text-white px-3 sm:px-4 py-2 rounded-lg font-semibold text-xs sm:text-sm flex items-center gap-2 transition shadow-sm pulse-ring">
+            <i data-lucide="phone-call" class="w-4 h-4"></i>
+            <span>Emergency Triage</span>
+          </button>
+          <button onclick="openBookingModal()" class="hidden sm:flex bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg font-semibold text-sm items-center gap-2 transition shadow-sm">
+            <i data-lucide="calendar" class="w-4 h-4"></i>
+            <span>Book Consult</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN VIEW CONTAINER -->
+  <main id="app-container" class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <!-- Dynamic Content Injected Here via JavaScript -->
+  </main>
+
+  <!-- GLOBAL FOOTER -->
+  <footer class="bg-slate-900 text-slate-300 border-t border-slate-800 mt-auto">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+        <div>
+          <div class="flex items-center gap-2 text-white font-bold text-lg mb-3">
+            <i data-lucide="cross" class="w-5 h-5 text-brand-500"></i>
+            Zim MediCare
+          </div>
+          <p class="text-sm text-slate-400">Pioneering accessible, mobile-first telemedicine, e-prescriptions, and real-time patient-doctor messaging across Zimbabwe.</p>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold text-sm mb-3">Quick Navigation</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="#" onclick="navigateTo('doctors')" class="hover:text-brand-400 transition">Verified Doctors</a></li>
+            <li><a href="#" onclick="navigateTo('messages')" class="hover:text-brand-400 transition">Live Consultation Chat</a></li>
+            <li><a href="#" onclick="navigateTo('pharmacy')" class="hover:text-brand-400 transition">E-Pharmacy Delivery</a></li>
+            <li><a href="#" onclick="navigateTo('records')" class="hover:text-brand-400 transition">Secure Health Records</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold text-sm mb-3">Major Hubs</h4>
+          <ul class="space-y-2 text-sm text-slate-400">
+            <li>Harare Central Telemedicine Unit</li>
+            <li>Bulawayo Emergency Dispatch</li>
+            <li>Mutare Rural Clinic Network</li>
+            <li>Gweru Specialist Referral</li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold text-sm mb-3">Emergency Response</h4>
+          <p class="text-xs text-slate-400 mb-2">24/7 Toll-Free Emergency Telemedicine Hotline</p>
+          <div class="text-lg font-bold text-red-400 flex items-center gap-2">
+            <i data-lucide="phone" class="w-5 h-5"></i>
+            +263 (0) 808 0999
+          </div>
+        </div>
+      </div>
+      <div class="border-t border-slate-800 pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
+        <p>&copy; 2026 Zim MediCare Health Technologies. All rights reserved.</p>
+        <div class="flex gap-4">
+          <a href="#" class="hover:underline">Privacy Policy</a>
+          <a href="#" class="hover:underline">Terms of Service</a>
+          <a href="#" class="hover:underline">Clinical Governance</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- MODAL CONTAINER (BOOKING / EMERGENCY / CHECKOUT) -->
+  <div id="modal-backdrop" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div id="modal-card" class="bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden border border-slate-100 transform transition-all scale-95 opacity-0">
+      <!-- Dynamic Modal Content Injection -->
+    </div>
+  </div>
+
+  <script>
+    // Global Application State
+    const state = {
+      currentPage: 'home',
+      authMode: 'signin', // 'signin' or 'signup'
+      authError: null,
+      authSuccess: null,
+      isAuthLoading: false,
+      activePortal: 'patient',
+      selectedDoctorChat: 1, // Default selected doctor ID
+      activeChatUnsubscribe: null,
+      cart: [],
+      selectedDoctor: null,
+      doctors: [
+        { id: 1, name: 'Dr. Tawanda Moyo', specialty: 'Cardiology', city: 'Harare', rating: 4.9, fee: 38, experience: '12 years treating hypertension, heart rhythm care, and cardiac reviews.', location: 'Borrowdale Medical Centre', time: '08:30 today', languages: ['English', 'Shona'], avatar: 'TM' },
+        { id: 2, name: 'Dr. Chipo Ndlovu', specialty: 'Paediatrics', city: 'Bulawayo', rating: 5.0, fee: 32, experience: '10 years in neonatal care, child immunizations, and developmental reviews.', location: 'Suburbs Clinic, Bulawayo', time: '11:00 today', languages: ['English', 'Ndebele'], avatar: 'CN' },
+        { id: 3, name: 'Dr. Farai Muchena', specialty: 'General Practice', city: 'Mutare', rating: 4.8, fee: 25, experience: '8 years general practice, chronic disease management, and family medicine.', location: 'Main Street Clinic, Mutare', time: '14:15 today', languages: ['English', 'Shona'], avatar: 'FM' },
+        { id: 4, name: 'Dr. Tendai Sibanda', specialty: 'Dermatology', city: 'Gweru', rating: 4.9, fee: 40, experience: '14 years specialist in inflammatory skin conditions and aesthetic dermatology.', location: 'Gweru Health Suite', time: '09:45 tomorrow', languages: ['English', 'Ndebele', 'Shona'], avatar: 'TS' }
+      ],
+      pharmacyItems: [
+        { id: 'm1', name: 'Amlodipine 5mg', desc: 'Blood pressure regulation (30 Tabs)', price: 7.40, category: 'Cardiovascular' },
+        { id: 'm2', name: 'ORS Hydration Sachets', desc: 'Electrolyte rehydration pack (10 sachets)', price: 3.20, category: 'Essential Care' },
+        { id: 'm3', name: 'Vitamin D3 High Potency', desc: 'Immune support 5000 IU (60 Caps)', price: 5.80, category: 'Supplements' },
+        { id: 'm4', name: 'Amoxicillin 500mg', desc: 'Broad-spectrum antibiotic (Rx required)', price: 12.50, category: 'Antibiotics' },
+        { id: 'm5', name: 'Metformin 500mg', desc: 'Glycemic management (100 Tabs)', price: 8.90, category: 'Diabetes' },
+        { id: 'm6', name: 'Paracetamol 500mg', desc: 'Analgesic & antipyretic relief (24 Tabs)', price: 1.50, category: 'Pain Relief' }
+      ],
+      medicalRecords: [
+        { id: 'r1', title: 'Blood Panel (HbA1c & Lipids)', category: 'Lab Results', date: 'Jun 28, 2026', doctor: 'Dr. Tawanda Moyo', status: 'Reviewed', details: 'HbA1c: 5.8% (Normal). Total Cholesterol: 4.2 mmol/L.' },
+        { id: 'r2', title: 'Amoxicillin 500mg - 3x Daily', category: 'Prescription', date: 'Jul 03, 2026', doctor: 'Dr. Farai Muchena', status: 'Active Refill', details: 'Take 1 capsule every 8 hours with meals for 7 days.' },
+        { id: 'r3', title: 'Chest X-Ray Digital Scan', category: 'Imaging', date: 'Jun 17, 2026', doctor: 'Dr. Tawanda Moyo', status: 'Ready', details: 'Lungs clear. Normal cardiac silhouette.' },
+        { id: 'r4', title: 'ECG Cardiac Rhythm Analysis', category: 'Diagnostics', date: 'May 10, 2026', doctor: 'Dr. Tawanda Moyo', status: 'Archived', details: 'Normal sinus rhythm at 72 bpm.' }
+      ]
+    };
+
+    // Navigation Controller
+    function navigateTo(page) {
+      if (state.currentPage === 'messages' && page !== 'messages' && state.activeChatUnsubscribe) {
+        state.activeChatUnsubscribe();
+        state.activeChatUnsubscribe = null;
+      }
+
+      state.currentPage = page;
+      updateActiveNavStyles();
+      renderPage();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function updateActiveNavStyles() {
+      ['home', 'doctors', 'messages', 'pharmacy', 'records', 'portals'].forEach(p => {
+        const el = document.getElementById(`nav-${p}`);
+        if (el) {
+          if (p === state.currentPage) {
+            el.className = "px-3 py-2 rounded-lg text-sm font-medium transition text-brand-700 bg-brand-50 flex items-center gap-1.5";
+          } else {
+            el.className = "px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-brand-600 hover:bg-slate-100 transition flex items-center gap-1.5";
+          }
+        }
+      });
+      updateAuthUI();
+    }
+
+    window.updateAuthUI = function() {
+      const widget = document.getElementById('auth-header-widget');
+      if (!widget) return;
+
+      const user = window.currentUser;
+      const profile = window.userProfileData;
+
+      if (user && !user.isAnonymous) {
+        const displayName = profile?.fullName || user.displayName || user.email?.split('@')[0] || 'Patient';
+        widget.innerHTML = `
+          <div class="hidden sm:flex items-center gap-2 bg-slate-100 p-1.5 pl-3 rounded-xl border border-slate-200 text-xs">
+            <div class="w-6 h-6 bg-brand-600 text-white rounded-full flex items-center justify-center font-bold text-[10px]">
+              ${displayName.substring(0, 2).toUpperCase()}
+            </div>
+            <div class="font-semibold text-slate-800 max-w-[110px] truncate">${displayName}</div>
+            <button onclick="handleSignOut()" class="text-slate-400 hover:text-red-600 p-1 ml-1" title="Sign Out">
+              <i data-lucide="log-out" class="w-4 h-4"></i>
+            </button>
+          </div>
+        `;
+      } else {
+        widget.innerHTML = `
+          <button onclick="navigateTo('auth')" class="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-2 rounded-lg font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition border border-slate-200">
+            <i data-lucide="user" class="w-4 h-4 text-brand-600"></i>
+            <span>Sign In / Register</span>
+          </button>
+        `;
+      }
+      lucide.createIcons();
+    };
+
+    function renderPage() {
+      const container = document.getElementById('app-container');
+      
+      switch(state.currentPage) {
+        case 'home':
+          container.innerHTML = getHomePageHTML();
+          break;
+        case 'doctors':
+          container.innerHTML = getDoctorsPageHTML();
+          break;
+        case 'messages':
+          container.innerHTML = getMessagesPageHTML();
+          setTimeout(() => initRealtimeChat(), 50);
+          break;
+        case 'pharmacy':
+          container.innerHTML = getPharmacyPageHTML();
+          break;
+        case 'records':
+          container.innerHTML = getRecordsPageHTML();
+          break;
+        case 'portals':
+          container.innerHTML = getPortalsPageHTML();
+          break;
+        case 'auth':
+          container.innerHTML = getAuthPageHTML();
+          break;
+        default:
+          container.innerHTML = getHomePageHTML();
+      }
+      
+      lucide.createIcons();
+    }
+
+    // --- PATIENT AUTHENTICATION PAGE HTML & LOGIC ---
+    function getAuthPageHTML() {
+      const isSignUp = state.authMode === 'signup';
+
+      return `
+        <div class="max-w-md mx-auto my-6 sm:my-12">
+          <div class="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden p-6 sm:p-8 space-y-6">
+            
+            <!-- Auth Header -->
+            <div class="text-center space-y-2">
+              <div class="inline-flex p-3 bg-brand-50 text-brand-600 rounded-2xl mb-1">
+                <i data-lucide="shield-check" class="w-8 h-8"></i>
+              </div>
+              <h1 class="text-2xl font-extrabold text-slate-900">${isSignUp ? 'Create Patient Account' : 'Patient Portal Sign In'}</h1>
+              <p class="text-xs text-slate-500">Access secure telemedicine, e-prescriptions, and direct messaging across Zimbabwe.</p>
+            </div>
+
+            <!-- Mode Switcher Tabs -->
+            <div class="bg-slate-100 p-1 rounded-xl flex">
+              <button onclick="switchAuthMode('signin')" class="flex-1 py-2 text-xs font-bold rounded-lg transition ${!isSignUp ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}">
+                Sign In
+              </button>
+              <button onclick="switchAuthMode('signup')" class="flex-1 py-2 text-xs font-bold rounded-lg transition ${isSignUp ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}">
+                Create Account
+              </button>
+            </div>
+
+            <!-- Error Banner -->
+            ${state.authError ? `
+              <div class="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl flex items-center gap-2">
+                <i data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i>
+                <div class="flex-1">${state.authError}</div>
+                <button onclick="state.authError=null; renderPage();" class="text-red-400 hover:text-red-700">&times;</button>
+              </div>
+            ` : ''}
+
+            <!-- Success Banner -->
+            ${state.authSuccess ? `
+              <div class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs p-3 rounded-xl flex items-center gap-2">
+                <i data-lucide="check-circle" class="w-4 h-4 shrink-0"></i>
+                <div class="flex-1">${state.authSuccess}</div>
+              </div>
+            ` : ''}
+
+            <!-- Auth Form -->
+            <form onsubmit="${isSignUp ? 'handlePatientSignUp(event)' : 'handlePatientSignIn(event)'}" class="space-y-4 text-xs">
+              
+              ${isSignUp ? `
+                <div>
+                  <label class="block font-semibold text-slate-700 mb-1">Full Name *</label>
+                  <input type="text" id="auth-fullname" required placeholder="e.g. Blessing Mabvuramiti" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50 focus:bg-white transition">
+                </div>
+              ` : ''}
+
+              <div>
+                <label class="block font-semibold text-slate-700 mb-1">Email Address *</label>
+                <input type="email" id="auth-email" required placeholder="patient@zimmedicare.co.zw" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50 focus:bg-white transition">
+              </div>
+
+              <div>
+                <label class="block font-semibold text-slate-700 mb-1">Password *</label>
+                <input type="password" id="auth-password" required minlength="6" placeholder="••••••••" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50 focus:bg-white transition">
+              </div>
+
+              ${isSignUp ? `
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Phone (+263)</label>
+                    <input type="tel" id="auth-phone" placeholder="+263 77 123 4567" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50">
+                  </div>
+                  <div>
+                    <label class="block font-semibold text-slate-700 mb-1">City Hub</label>
+                    <select id="auth-city" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50">
+                      <option value="Harare">Harare</option>
+                      <option value="Bulawayo">Bulawayo</option>
+                      <option value="Mutare">Mutare</option>
+                      <option value="Gweru">Gweru</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block font-semibold text-slate-700 mb-1">Medical Insurance Provider</label>
+                  <select id="auth-insurance" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50">
+                    <option value="CIMAS">CIMAS Medical Aid</option>
+                    <option value="PSMAS">PSMAS</option>
+                    <option value="First Mutual">First Mutual Health</option>
+                    <option value="Self-Pay">Self-Pay / Cash</option>
+                  </select>
+                </div>
+              ` : ''}
+
+              <button type="submit" ${state.isAuthLoading ? 'disabled' : ''} class="w-full bg-brand-600 hover:bg-brand-700 text-white font-bold py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2 disabled:bg-slate-400">
+                ${state.isAuthLoading ? '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Authenticating...' : (isSignUp ? 'Create Patient Account' : 'Sign In to Portal')}
+              </button>
+            </form>
+
+            <!-- Quick Demo Credentials Helper -->
+            <div class="border-t border-slate-100 pt-4 text-center">
+              <button onclick="fillDemoCredentials()" class="text-xs font-semibold text-brand-700 hover:underline inline-flex items-center gap-1">
+                <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-500"></i> Autofill Demo Patient Credentials
+              </button>
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    function switchAuthMode(mode) {
+      state.authMode = mode;
+      state.authError = null;
+      state.authSuccess = null;
+      renderPage();
+    }
+
+    function fillDemoCredentials() {
+      const emailEl = document.getElementById('auth-email');
+      const passEl = document.getElementById('auth-password');
+      const nameEl = document.getElementById('auth-fullname');
+
+      if (emailEl) emailEl.value = "patient.demo@zimmedicare.co.zw";
+      if (passEl) passEl.value = "Patient123!";
+      if (nameEl) nameEl.value = "Blessing Mabvuramiti";
+    }
+
+    async function handlePatientSignUp(e) {
+      e.preventDefault();
+      state.authError = null;
+      state.authSuccess = null;
+      state.isAuthLoading = true;
+      renderPage();
+
+      const emailInput = document.getElementById('auth-email');
+      const email = emailInput ? emailInput.value.trim().toLowerCase() : '';
+      const password = document.getElementById('auth-password')?.value || '';
+      const fullName = document.getElementById('auth-fullname')?.value.trim() || '';
+      const phone = document.getElementById('auth-phone')?.value.trim() || '';
+      const city = document.getElementById('auth-city')?.value || 'Harare';
+      const insurance = document.getElementById('auth-insurance')?.value || 'Self-Pay';
+
+      // Validate Email Format before calling Firebase
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!email || !emailRegex.test(email)) {
+        state.isAuthLoading = false;
+        state.authError = "Please enter a valid email address (e.g. patient@zimmedicare.co.zw).";
+        renderPage();
+        return;
+      }
+
+      const { auth, db, appId, createUserWithEmailAndPassword, updateProfile, setDoc, doc } = window.firebaseApp;
+
+      try {
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCred.user;
+
+        // Update Auth Display Name
+        await updateProfile(user, { displayName: fullName });
+
+        // Save detailed patient profile in Firestore RULE 1 path
+        const profileData = {
+          uid: user.uid,
+          fullName: fullName,
+          email: email,
+          phone: phone,
+          city: city,
+          insurance: insurance,
+          createdAt: Date.now()
+        };
+
+        const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
+        await setDoc(profileRef, profileData);
+
+        window.userProfileData = profileData;
+        state.isAuthLoading = false;
+        state.authSuccess = "Account created successfully! Redirecting...";
+        renderPage();
+
+        setTimeout(() => {
+          navigateTo('portals');
+        }, 1200);
+
+      } catch (err) {
+        state.isAuthLoading = false;
+        console.error("Sign Up Error:", err);
+        state.authError = formatAuthErrorMessage(err.code || err.message);
+        renderPage();
+      }
+    }
+
+    async function handlePatientSignIn(e) {
+      e.preventDefault();
+      state.authError = null;
+      state.authSuccess = null;
+      state.isAuthLoading = true;
+      renderPage();
+
+      const emailInput = document.getElementById('auth-email');
+      const email = emailInput ? emailInput.value.trim().toLowerCase() : '';
+      const password = document.getElementById('auth-password')?.value || '';
+
+      // Validate Email Format before calling Firebase
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!email || !emailRegex.test(email)) {
+        state.isAuthLoading = false;
+        state.authError = "Please enter a valid email address (e.g. patient@zimmedicare.co.zw).";
+        renderPage();
+        return;
+      }
+
+      const { auth, signInWithEmailAndPassword } = window.firebaseApp;
+
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        state.isAuthLoading = false;
+        state.authSuccess = "Signed in successfully! Redirecting...";
+        renderPage();
+
+        setTimeout(() => {
+          navigateTo('portals');
+        }, 1000);
+
+      } catch (err) {
+        state.isAuthLoading = false;
+        console.error("Sign In Error:", err);
+        state.authError = formatAuthErrorMessage(err.code || err.message);
+        renderPage();
+      }
+    }
+
+    async function handleSignOut() {
+      const { auth, signOut, signInAnonymously } = window.firebaseApp;
+      try {
+        await signOut(auth);
+        window.userProfileData = null;
+        // Re-authenticate anonymously for guest browsing
+        await signInAnonymously(auth);
+        navigateTo('home');
+      } catch(err) {
+        console.error("Sign Out error:", err);
+      }
+    }
+
+    function formatAuthErrorMessage(code) {
+      const errStr = String(code || '');
+      if (errStr.includes('invalid-email')) {
+        return "Please enter a valid email address (e.g. patient@zimmedicare.co.zw).";
+      }
+      if (errStr.includes('user-not-found') || errStr.includes('wrong-password') || errStr.includes('invalid-credential')) {
+        return "Invalid email address or password. Please check your credentials.";
+      }
+      if (errStr.includes('email-already-in-use')) {
+        return "An account with this email address already exists. Please sign in instead.";
+      }
+      if (errStr.includes('weak-password')) {
+        return "Password should be at least 6 characters long.";
+      }
+      return "Authentication error: " + errStr;
+    }
+
+    function getHomePageHTML() {
+      return `
+        <!-- HERO SECTION -->
+<!-- ... existing code -->
